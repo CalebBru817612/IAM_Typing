@@ -16,7 +16,7 @@ except Exception:
     whisper = None
 
 
-APP_NAME = "IAM Typist"
+APP_NAME = "IAM Typing"
 APP_VERSION = "v1.0.0-compact"
 
 COLOR_BG = "#eef2f7"
@@ -44,7 +44,7 @@ SUPPORTED_FILETYPES = [
 ]
 
 
-class IAMTypistApp:
+class IAMTypingApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME} {APP_VERSION}")
@@ -102,7 +102,7 @@ class IAMTypistApp:
 
         tk.Label(
             logo_frame,
-            text="IAM Typist",
+            text="IAM Typing",
             bg=COLOR_SIDEBAR,
             fg=COLOR_WHITE,
             font=("Arial", 20, "bold")
@@ -179,7 +179,7 @@ class IAMTypistApp:
 
         tk.Label(
             title_wrap,
-            text="IAM Typist",
+            text="IAM Typing",
             font=("Arial", 21, "bold"),
             fg=COLOR_TEXT,
             bg=COLOR_WHITE
@@ -375,7 +375,7 @@ class IAMTypistApp:
             bg=COLOR_PANEL
         ).pack(anchor="w", padx=16, pady=(10, 6))
 
-        for item in ["Whisper Base", "Single Speaker", "Typist Proofread Workflow"]:
+        for item in ["Whisper Base", "Single Speaker", "Typing Proofread Workflow"]:
             tk.Label(
                 settings_panel,
                 text=item,
@@ -1107,7 +1107,7 @@ class IAMTypistApp:
 
 def main():
     root = tk.Tk()
-    app = IAMTypistApp(root)
+    app = IAMTypingApp(root)
     root.mainloop()
 
 
