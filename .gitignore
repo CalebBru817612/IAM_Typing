@@ -17,3 +17,8 @@ exports/
 build/
 dist/
 *.spec
+.idea/
+ffmpeg-8.1.1-essentials_build/
+ffmpeg-*/
+hungingfacekey.txt
+Transcriber.py
