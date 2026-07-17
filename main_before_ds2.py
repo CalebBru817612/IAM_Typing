@@ -61,108 +61,9 @@ def configure_ffmpeg():
 
 FFMPEG_EXECUTABLE = configure_ffmpeg()
 
-# IAM_TYPING_DS2_SUPPORT_V1
-class DS2ConversionError(RuntimeError):
-    pass
-
-
-class DS2Converter:
-    def __init__(self):
-        self.app_dir = os.path.dirname(os.path.abspath(__file__))
-        self.codec_dir = os.path.join(self.app_dir, "ds2_codec")
-        self.decoder_path = os.path.join(self.codec_dir, "ds2decode.py")
-        self.required_files = [
-            self.decoder_path,
-            os.path.join(self.codec_dir, "ds2_lsp_codebook.npz"),
-            os.path.join(self.codec_dir, "ds2_qp_codebook.npz"),
-        ]
-
-    def verify(self):
-        missing = [
-            os.path.basename(path)
-            for path in self.required_files
-            if not os.path.isfile(path)
-        ]
-        if missing:
-            raise DS2ConversionError(
-                "DS2 support files are missing:\n\n"
-                + "\n".join(missing)
-                + "\n\nRun install_ds2_support.py again."
-            )
-
-        try:
-            import numpy
-        except Exception as error:
-            raise DS2ConversionError(
-                "NumPy is required for DS2 conversion.\n\n"
-                "Run: python -m pip install numpy"
-            ) from error
-
-    def convert(self, source_path):
-        import importlib.util
-        import tempfile
-        import uuid
-
-        self.verify()
-
-        with open(source_path, "rb") as source:
-            header = source.read(4)
-
-        if header == b"\x03enc":
-            raise DS2ConversionError(
-                "This DS2 file is encrypted.\n\n"
-                "This first DS2 build supports unencrypted files only."
-            )
-
-        if header not in (b"\x03ds2", b"\x01ds2", b"\x07ds2"):
-            raise DS2ConversionError(
-                "This file is not a supported DS2 format."
-            )
-
-        module_name = "iam_ds2decode_" + uuid.uuid4().hex
-        spec = importlib.util.spec_from_file_location(
-            module_name,
-            self.decoder_path
-        )
-        if spec is None or spec.loader is None:
-            raise DS2ConversionError("Could not load the DS2 decoder.")
-
-        decoder_module = importlib.util.module_from_spec(spec)
-        old_folder = os.getcwd()
-        output_path = os.path.join(
-            tempfile.gettempdir(),
-            "IAM_Typing_DS2_" + uuid.uuid4().hex + ".wav"
-        )
-
-        try:
-            os.chdir(self.codec_dir)
-            spec.loader.exec_module(decoder_module)
-            _frames, _count, mode = decoder_module.read_ds2_file(source_path)
-            decoder = decoder_module.DS2Decoder(mode)
-            decoder.decode_file(source_path, output_path)
-        except Exception as error:
-            try:
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-            except OSError:
-                pass
-            raise DS2ConversionError(
-                "IAM Typing could not convert this DS2 file.\n\n"
-                + str(error)
-            ) from error
-        finally:
-            os.chdir(old_folder)
-
-        if not os.path.isfile(output_path) or os.path.getsize(output_path) <= 44:
-            raise DS2ConversionError(
-                "The DS2 decoder did not create a valid WAV file."
-            )
-
-        return output_path
-
 
 APP_NAME = "IAM Typing"
-APP_VERSION = "v1.0.3-ds2"
+APP_VERSION = "v1.0.2-compact"
 
 COLOR_BG = "#eef2f7"
 COLOR_PANEL = "#f8fafc"
@@ -198,14 +99,9 @@ class IAMTypingApp:
         self.root.configure(bg=COLOR_BG)
 
         self.selected_file = ""
-        self.source_file = ""
-        self.temp_audio_file = ""
         self.recent_files = {}
         self.is_transcribing = False
-        self.is_converting_ds2 = False
         self.whisper_model = None
-        self.ds2_converter = DS2Converter()
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         if vlc is not None:
             self.player = vlc.MediaPlayer()
@@ -912,108 +808,6 @@ class IAMTypingApp:
                 command=command
             ).pack(side="left", padx=(0, 10))
 
-    def cleanup_temp_audio(self):
-        if not self.temp_audio_file:
-            return
-
-        if self.player:
-            try:
-                self.player.stop()
-            except Exception:
-                pass
-
-        try:
-            if os.path.exists(self.temp_audio_file):
-                os.remove(self.temp_audio_file)
-        except OSError:
-            pass
-
-        self.temp_audio_file = ""
-
-    def on_close(self):
-        if self.player:
-            try:
-                self.player.stop()
-            except Exception:
-                pass
-
-        self.cleanup_temp_audio()
-        self.root.destroy()
-
-    def prepare_selected_file(self, selected_file):
-        self.source_file = selected_file
-        self.update_file_info(selected_file)
-
-        file_name = os.path.basename(selected_file)
-        self.recent_files[file_name] = selected_file
-
-        if len(self.recent_files) > 15:
-            oldest = list(self.recent_files.keys())[0]
-            del self.recent_files[oldest]
-
-        if os.path.splitext(selected_file)[1].lower() != ".ds2":
-            self.cleanup_temp_audio()
-            self.selected_file = selected_file
-            self.load_media_for_playback(selected_file)
-            self.set_progress(
-                0,
-                "File ready. Use playback or Start Auto Draft."
-            )
-            self.set_status("File ready")
-            return
-
-        self.cleanup_temp_audio()
-        self.selected_file = ""
-        self.is_converting_ds2 = True
-        self.set_start_buttons("disabled", "Converting DS2...")
-        self.set_progress(5, "Converting Philips DS2 to WAV...")
-        self.set_status("Converting DS2")
-
-        threading.Thread(
-            target=self.convert_ds2_for_use,
-            args=(selected_file,),
-            daemon=True
-        ).start()
-
-    def convert_ds2_for_use(self, source_file):
-        try:
-            wav_file = self.ds2_converter.convert(source_file)
-            self.safe_ui(
-                lambda: self.finish_ds2_conversion(source_file, wav_file)
-            )
-        except Exception as error:
-            self.safe_ui(
-                lambda error=error: self.fail_ds2_conversion(error)
-            )
-
-    def finish_ds2_conversion(self, source_file, wav_file):
-        if source_file != self.source_file:
-            try:
-                if os.path.exists(wav_file):
-                    os.remove(wav_file)
-            except OSError:
-                pass
-            return
-
-        self.temp_audio_file = wav_file
-        self.selected_file = wav_file
-        self.is_converting_ds2 = False
-        self.load_media_for_playback(wav_file)
-        self.set_start_buttons("normal", "▶ Start Typing Draft")
-        self.set_progress(
-            100,
-            "DS2 converted. Ready for playback or Auto Draft."
-        )
-        self.set_status("DS2 ready")
-
-    def fail_ds2_conversion(self, error):
-        self.is_converting_ds2 = False
-        self.selected_file = ""
-        self.set_start_buttons("normal", "▶ Start Typing Draft")
-        self.set_progress(0, "DS2 conversion failed")
-        self.set_status("DS2 error")
-        messagebox.showerror("DS2 Conversion Error", str(error))
-
     def select_file(self):
         selected_file = filedialog.askopenfilename(
             title="Select Dictation Audio or Video File",
@@ -1023,7 +817,19 @@ class IAMTypingApp:
         if not selected_file:
             return
 
-        self.prepare_selected_file(selected_file)
+        self.selected_file = selected_file
+        self.load_media_for_playback(selected_file)
+        self.update_file_info(selected_file)
+
+        file_name = os.path.basename(selected_file)
+        self.recent_files[file_name] = selected_file
+
+        if len(self.recent_files) > 15:
+            oldest = list(self.recent_files.keys())[0]
+            del self.recent_files[oldest]
+
+        self.set_status("File ready")
+        self.progress_title.config(text="File ready. Use playback or Start Auto Draft.")
 
     def update_file_info(self, file_path):
         file_name = os.path.basename(file_path)
@@ -1138,13 +944,6 @@ class IAMTypingApp:
         return f"{minutes:02}:{seconds:02}"
 
     def start_auto_draft(self):
-        if self.is_converting_ds2:
-            messagebox.showinfo(
-                "Converting DS2",
-                "Please allow the DS2 conversion to finish first."
-            )
-            return
-
         if self.is_transcribing:
             messagebox.showinfo("Busy", "Auto Draft is already running.")
             return
@@ -1334,10 +1133,8 @@ class IAMTypingApp:
             messagebox.showinfo("Success", "DOCX exported successfully.")
 
     def default_export_name(self, extension):
-        export_source = self.source_file or self.selected_file
-
-        if export_source:
-            base_name = os.path.splitext(os.path.basename(export_source))[0]
+        if self.selected_file:
+            base_name = os.path.splitext(os.path.basename(self.selected_file))[0]
         else:
             base_name = "typed_document"
 
@@ -1348,8 +1145,6 @@ class IAMTypingApp:
         if self.player:
             self.player.stop()
 
-        self.source_file = ""
-        self.cleanup_temp_audio()
         self.selected_file = ""
         self.transcript_text.delete("1.0", "end")
         self.transcript_text.insert("end", "Your typed document or auto draft will appear here...")
@@ -1406,7 +1201,10 @@ class IAMTypingApp:
             path = self.recent_files.get(name)
 
             if path and os.path.exists(path):
-                self.prepare_selected_file(path)
+                self.selected_file = path
+                self.load_media_for_playback(path)
+                self.update_file_info(path)
+                self.set_status("File ready")
                 history_window.destroy()
             else:
                 messagebox.showerror("Missing file", "This file no longer exists.")
