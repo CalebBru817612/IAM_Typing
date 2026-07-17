@@ -1,4 +1,5 @@
 import os
+import shutil
 import threading
 from datetime import datetime
 import tkinter as tk
@@ -16,8 +17,53 @@ except Exception:
     whisper = None
 
 
+def configure_ffmpeg():
+    """Locate bundled FFmpeg and add its bin folder to PATH for Whisper."""
+    existing_ffmpeg = shutil.which("ffmpeg")
+    if existing_ffmpeg:
+        return existing_ffmpeg
+
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+
+    candidate_folders = [
+        os.path.join(app_dir, "ffmpeg", "bin"),
+        os.path.join(app_dir, "ffmpeg-8.1.1-essentials_build", "bin"),
+        os.path.join(
+            app_dir,
+            "ffmpeg-8.1.1-essentials_build",
+            "ffmpeg-8.1.1-essentials_build",
+            "bin"
+        ),
+    ]
+
+    for folder in candidate_folders:
+        ffmpeg_exe = os.path.join(folder, "ffmpeg.exe")
+        if os.path.isfile(ffmpeg_exe):
+            os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+            return ffmpeg_exe
+
+    # Final fallback: search the IAM Typing project folder automatically.
+    ignored_folders = {".git", ".venv", "venv", "__pycache__"}
+
+    for current_folder, folders, files in os.walk(app_dir):
+        folders[:] = [
+            folder for folder in folders
+            if folder.lower() not in ignored_folders
+        ]
+
+        if "ffmpeg.exe" in files:
+            ffmpeg_exe = os.path.join(current_folder, "ffmpeg.exe")
+            os.environ["PATH"] = current_folder + os.pathsep + os.environ.get("PATH", "")
+            return ffmpeg_exe
+
+    return None
+
+
+FFMPEG_EXECUTABLE = configure_ffmpeg()
+
+
 APP_NAME = "IAM Typing"
-APP_VERSION = "v1.0.0-compact"
+APP_VERSION = "v1.0.2-compact"
 
 COLOR_BG = "#eef2f7"
 COLOR_PANEL = "#f8fafc"
@@ -48,8 +94,8 @@ class IAMTypingApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{APP_NAME} {APP_VERSION}")
-        self.root.geometry("1280x760")
-        self.root.minsize(980, 600)
+        self.root.geometry("1120x700")
+        self.root.minsize(1000, 620)
         self.root.configure(bg=COLOR_BG)
 
         self.selected_file = ""
@@ -83,7 +129,7 @@ class IAMTypingApp:
         self.root.grid_columnconfigure(1, weight=1)
         self.root.grid_rowconfigure(0, weight=1)
 
-        self.sidebar = tk.Frame(self.root, bg=COLOR_SIDEBAR, width=220)
+        self.sidebar = tk.Frame(self.root, bg=COLOR_SIDEBAR, width=230)
         self.sidebar.grid(row=0, column=0, sticky="ns")
         self.sidebar.grid_propagate(False)
 
@@ -105,7 +151,7 @@ class IAMTypingApp:
             text="IAM Typing",
             bg=COLOR_SIDEBAR,
             fg=COLOR_WHITE,
-            font=("Arial", 20, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(anchor="w", padx=25)
 
         tk.Label(
@@ -124,7 +170,43 @@ class IAMTypingApp:
             font=("Arial", 9, "bold")
         ).pack(anchor="w", padx=26, pady=(3, 0))
 
-        tk.Frame(self.sidebar, bg=COLOR_ACCENT, height=2).pack(fill="x", padx=20, pady=(10, 14))
+        tk.Frame(self.sidebar, bg=COLOR_ACCENT, height=2).pack(fill="x", padx=18, pady=(10, 12))
+
+        workflow_card = tk.Frame(self.sidebar, bg="#0b2b53", highlightbackground="#164575", highlightthickness=1)
+        workflow_card.pack(fill="x", padx=14, pady=(0, 10))
+
+        tk.Label(
+            workflow_card,
+            text="Workflow",
+            font=("Segoe UI Semibold", 10),
+            fg=COLOR_WHITE,
+            bg="#0b2b53"
+        ).pack(anchor="w", padx=12, pady=(9, 4))
+
+        for step in ["1  Select file", "2  Start draft", "3  Proofread", "4  Export"]:
+            tk.Label(
+                workflow_card,
+                text=step,
+                font=("Segoe UI", 9),
+                fg="#c7d7ec",
+                bg="#0b2b53"
+            ).pack(anchor="w", padx=14, pady=1)
+
+        self.sidebar_start_button = tk.Button(
+            self.sidebar,
+            text="▶ Start Typing Draft",
+            font=("Segoe UI", 10, "bold"),
+            bg=COLOR_ACCENT,
+            fg=COLOR_BLUE_2,
+            activebackground="#fbbf24",
+            activeforeground=COLOR_BLUE_2,
+            relief="flat",
+            bd=0,
+            height=2,
+            cursor="hand2",
+            command=self.start_auto_draft
+        )
+        self.sidebar_start_button.pack(fill="x", pady=(0, 8), padx=14)
 
         sidebar_buttons = [
             ("Start Fresh", self.start_fresh),
@@ -139,34 +221,56 @@ class IAMTypingApp:
             btn = tk.Button(
                 self.sidebar,
                 text=text,
-                font=("Arial", 12, "bold"),
+                font=("Segoe UI", 10, "bold"),
                 bg=COLOR_SIDEBAR_BTN,
                 fg=COLOR_WHITE,
                 activebackground=COLOR_SIDEBAR_BTN_HOVER,
                 activeforeground=COLOR_WHITE,
                 relief="flat",
                 bd=0,
-                width=19,
                 height=1,
                 cursor="hand2",
                 command=command
             )
-            btn.pack(pady=4, padx=12)
+            btn.pack(fill="x", pady=3, padx=14)
+
+        status_card = tk.Frame(self.sidebar, bg="#061a33", highlightbackground="#164575", highlightthickness=1)
+        status_card.pack(side="bottom", fill="x", padx=14, pady=14)
 
         tk.Label(
-            self.sidebar,
-            text="Single-speaker dictation\nNo speaker detection",
-            font=("Arial", 9),
-            fg="#9fb3cc",
-            bg=COLOR_SIDEBAR,
+            status_card,
+            text="Status",
+            font=("Segoe UI Semibold", 10),
+            fg=COLOR_ACCENT,
+            bg="#061a33"
+        ).pack(anchor="w", padx=12, pady=(9, 2))
+
+        self.side_status = tk.Label(
+            status_card,
+            text="Ready",
+            font=("Segoe UI", 9),
+            fg="#c7d7ec",
+            bg="#061a33",
             justify="left"
-        ).pack(side="bottom", anchor="w", padx=22, pady=14)
+        )
+        self.side_status.pack(anchor="w", padx=12, pady=(0, 4))
+
+        self.side_file = tk.Label(
+            status_card,
+            text="No file selected\nSingle speaker only",
+            font=("Segoe UI", 8),
+            fg="#9fb3cc",
+            bg="#061a33",
+            justify="left",
+            wraplength=180
+        )
+        self.side_file.pack(anchor="w", padx=12, pady=(0, 10))
 
     def build_topbar(self):
         top_bar = tk.Frame(
             self.main_area,
             bg=COLOR_WHITE,
-            height=66,
+            height=58,
             highlightbackground=COLOR_BORDER,
             highlightthickness=1
         )
@@ -180,7 +284,7 @@ class IAMTypingApp:
         tk.Label(
             title_wrap,
             text="IAM Typing",
-            font=("Arial", 21, "bold"),
+            font=("Segoe UI", 19, "bold"),
             fg=COLOR_TEXT,
             bg=COLOR_WHITE
         ).pack(anchor="w")
@@ -221,8 +325,8 @@ class IAMTypingApp:
             command=page_canvas.yview
         )
 
-        page_canvas.grid(row=1, column=0, sticky="nsew", padx=(14, 0), pady=14)
-        page_scrollbar.grid(row=1, column=1, sticky="ns", padx=(5, 10), pady=14)
+        page_canvas.grid(row=1, column=0, sticky="nsew", padx=(10, 0), pady=10)
+        page_scrollbar.grid(row=1, column=1, sticky="ns", padx=(4, 8), pady=10)
 
         content = tk.Frame(page_canvas, bg=COLOR_BG)
         canvas_window = page_canvas.create_window((0, 0), window=content, anchor="nw")
@@ -279,7 +383,7 @@ class IAMTypingApp:
         top_panels.grid_columnconfigure(1, weight=1)
         top_panels.grid_columnconfigure(2, weight=1)
 
-        upload_panel = self.make_panel(top_panels, 150)
+        upload_panel = self.make_panel(top_panels, 160)
         upload_panel.grid(row=0, column=0, sticky="ew", padx=(0, 10))
 
         tk.Label(
@@ -324,7 +428,7 @@ class IAMTypingApp:
             bg=COLOR_PANEL
         ).pack(anchor="w", padx=16, pady=(8, 0))
 
-        info_panel = self.make_panel(top_panels, 150)
+        info_panel = self.make_panel(top_panels, 160)
         info_panel.grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
         tk.Label(
@@ -364,7 +468,7 @@ class IAMTypingApp:
         )
         self.file_format_value.pack(anchor="w", padx=16, pady=3)
 
-        settings_panel = self.make_panel(top_panels, 150)
+        settings_panel = self.make_panel(top_panels, 160)
         settings_panel.grid(row=0, column=2, sticky="ew")
 
         tk.Label(
@@ -375,35 +479,36 @@ class IAMTypingApp:
             bg=COLOR_PANEL
         ).pack(anchor="w", padx=16, pady=(10, 6))
 
-        for item in ["Whisper Base", "Single Speaker", "Typing Proofread Workflow"]:
+        mode_card = tk.Frame(settings_panel, bg=COLOR_WHITE, highlightbackground=COLOR_BORDER, highlightthickness=1)
+        mode_card.pack(fill="x", padx=16, pady=(0, 6))
+
+        for item in ["Whisper Base", "Single Speaker", "Proofread after draft"]:
             tk.Label(
-                settings_panel,
+                mode_card,
                 text=item,
-                font=("Arial", 9),
+                font=("Segoe UI", 8),
                 fg=COLOR_TEXT,
                 bg=COLOR_WHITE,
                 padx=10,
-                pady=5,
-                highlightbackground=COLOR_BORDER,
-                highlightthickness=1
-            ).pack(fill="x", padx=16, pady=2)
+                pady=2
+            ).pack(fill="x")
 
         self.start_button = tk.Button(
             settings_panel,
-            text="Start Auto Draft",
+            text="▶ Start Typing Draft",
             font=("Segoe UI", 10, "bold"),
-            bg=COLOR_BLUE,
-            fg=COLOR_WHITE,
-            activebackground=COLOR_SIDEBAR_BTN_HOVER,
-            activeforeground=COLOR_WHITE,
+            bg=COLOR_ACCENT,
+            fg=COLOR_BLUE_2,
+            activebackground="#fbbf24",
+            activeforeground=COLOR_BLUE_2,
             relief="flat",
             bd=0,
             padx=11,
-            pady=5,
+            pady=7,
             cursor="hand2",
             command=self.start_auto_draft
         )
-        self.start_button.pack(fill="x", padx=55, pady=(6, 0))
+        self.start_button.pack(fill="x", padx=16, pady=(0, 8))
 
     def build_progress_panel(self, parent):
         progress_panel = self.make_panel(parent, 66)
@@ -436,7 +541,7 @@ class IAMTypingApp:
         self.progress_percent.pack(anchor="e", padx=16, pady=(2, 0))
 
     def build_work_area(self, parent):
-        work_area = tk.Frame(parent, bg=COLOR_BG, height=430)
+        work_area = tk.Frame(parent, bg=COLOR_BG, height=360)
         work_area.grid(row=2, column=0, sticky="nsew")
         work_area.grid_propagate(False)
         work_area.grid_columnconfigure(0, weight=3)
@@ -491,7 +596,7 @@ class IAMTypingApp:
             fg=COLOR_TEXT,
             insertbackground=COLOR_TEXT,
             relief="flat",
-            font=("Consolas", 10),
+            font=("Segoe UI", 10),
             wrap="word",
             padx=12,
             pady=12,
@@ -669,7 +774,7 @@ class IAMTypingApp:
         note.grid(row=5, column=0, sticky="w", padx=24, pady=(16, 0))
 
     def build_export_panel(self, parent):
-        export_panel = self.make_panel(parent, 82)
+        export_panel = self.make_panel(parent, 74)
         export_panel.grid(row=3, column=0, sticky="ew", pady=(10, 0))
 
         tk.Label(
@@ -734,6 +839,10 @@ class IAMTypingApp:
         self.file_name_value.config(text=f"Name: {file_name}")
         self.file_size_value.config(text=f"Size: {size_mb} MB")
         self.file_format_value.config(text=f"Format: {extension}")
+
+        if hasattr(self, "side_file"):
+            short_name = file_name if len(file_name) <= 28 else file_name[:25] + "..."
+            self.side_file.config(text=f"{short_name}\n{size_mb} MB • {extension}")
 
     def load_media_for_playback(self, file_path):
         if self.player is None or vlc is None:
@@ -850,8 +959,16 @@ class IAMTypingApp:
             )
             return
 
+        if FFMPEG_EXECUTABLE is None:
+            messagebox.showerror(
+                "FFmpeg missing",
+                "IAM Typing could not find ffmpeg.exe.\n\n"
+                "Keep the FFmpeg folder inside the IAM_Typing project folder."
+            )
+            return
+
         self.is_transcribing = True
-        self.start_button.config(state="disabled", text="Drafting...")
+        self.set_start_buttons("disabled", "Drafting...")
         self.set_progress(5, "Starting Auto Draft...")
         threading.Thread(target=self.run_single_speaker_transcription, daemon=True).start()
 
@@ -904,14 +1021,14 @@ class IAMTypingApp:
         self.set_progress(100, "Auto Draft completed")
         self.set_status("Draft ready")
         self.is_transcribing = False
-        self.start_button.config(state="normal", text="Start Auto Draft")
+        self.set_start_buttons("normal", "▶ Start Typing Draft")
         messagebox.showinfo("Completed", "Auto Draft completed. Please proofread the text.")
 
     def fail_transcription(self, error):
         self.set_progress(0, "Auto Draft failed")
         self.set_status("Error")
         self.is_transcribing = False
-        self.start_button.config(state="normal", text="Start Auto Draft")
+        self.set_start_buttons("normal", "▶ Start Typing Draft")
         messagebox.showerror("Auto Draft Error", str(error))
 
     def safe_ui(self, callback):
@@ -924,6 +1041,14 @@ class IAMTypingApp:
 
     def set_status(self, message):
         self.top_status.config(text=message)
+        if hasattr(self, "side_status"):
+            self.side_status.config(text=message)
+
+    def set_start_buttons(self, state, text):
+        if hasattr(self, "start_button"):
+            self.start_button.config(state=state, text=text)
+        if hasattr(self, "sidebar_start_button"):
+            self.sidebar_start_button.config(state=state, text=text)
 
     def update_word_count(self, event=None):
         text = self.transcript_text.get("1.0", "end-1c")
@@ -1027,6 +1152,8 @@ class IAMTypingApp:
         self.file_name_value.config(text="Name: No file selected")
         self.file_size_value.config(text="Size: -- MB")
         self.file_format_value.config(text="Format: ---")
+        if hasattr(self, "side_file"):
+            self.side_file.config(text="No file selected\nSingle speaker only")
 
         self.timeline.set(0)
         self.current_time.config(text="00:00")
